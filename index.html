@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f0c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Мой Трек" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <link rel="icon" href="./icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Мой Трек</title>
+</head>
+<body>
+  <main class="app" id="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">ДНЕВНИК ТРЕНИРОВОК</div>
+        <h1 id="title">Загрузка…</h1>
+        <div id="syncLine" class="sync">Подключение к облаку…</div>
+      </div>
+      <button id="refreshBtn" class="btn ghost small">⟳ Обновить</button>
+    </header>
+
+    <section id="setup" class="card hidden">
+      <h2>Подключение устройства</h2>
+      <p class="muted">Откройте персональную ссылку на этом iPhone. После первого запуска вход больше не потребуется.</p>
+    </section>
+
+    <section id="dayCard" class="card hidden">
+      <label>Дата</label>
+      <input id="dateInput" type="date" class="field" />
+      <div id="dateLabel" class="subtle"></div>
+
+      <div class="section-label">Статус дня</div>
+      <div class="segmented" id="statusButtons">
+        <button data-status="rest">Отдых</button>
+        <button data-status="planned">План</button>
+        <button data-status="completed">Завершена</button>
+      </div>
+
+      <div class="section-label">План</div>
+      <div class="segmented" id="planButtons">
+        <button data-plan="A">A</button>
+        <button data-plan="B">B</button>
+        <button data-plan="C">C</button>
+      </div>
+      <p class="subtle">Цикл A → B → C. Перенос даты не меняет тип тренировки.</p>
+
+      <div class="two-col">
+        <div>
+          <label>Утренний вес, кг</label>
+          <input id="weightInput" inputmode="decimal" class="field" placeholder="—" />
+        </div>
+        <div>
+          <label>Шаги за день</label>
+          <input id="stepsInput" inputmode="numeric" class="field" placeholder="—" />
+        </div>
+      </div>
+
+      <label>Заметка</label>
+      <textarea id="notesInput" class="field textarea" rows="2" placeholder="—"></textarea>
+    </section>
+
+    <div id="exerciseList"></div>
+
+    <section id="summaryCard" class="card hidden">
+      <h2>Итог тренировки</h2>
+      <div class="stats">
+        <div><strong id="setsTotal">0</strong><span>Подходы</span></div>
+        <div><strong id="repsTotal">0</strong><span>Повторы</span></div>
+        <div><strong id="tonnageTotal">0</strong><span>Тоннаж, кг</span></div>
+      </div>
+      <button id="finishBtn" class="btn primary full">Завершить тренировку</button>
+      <button id="copyBtn" class="btn ghost full">Скопировать итог</button>
+    </section>
+
+    <section class="history-section">
+      <h2>История</h2>
+      <div id="historyList"></div>
+    </section>
+  </main>
+
+  <template id="exerciseTemplate">
+    <section class="card exercise-card">
+      <div class="exercise-head">
+        <div>
+          <h2 class="exercise-title"></h2>
+          <div class="subtle exercise-kind"></div>
+        </div>
+        <button class="delete-exercise btn ghost small">×</button>
+      </div>
+      <div class="sets"></div>
+      <button class="add-set btn ghost full">+ Добавить подход</button>
+      <div class="subtle exercise-total"></div>
+    </section>
+  </template>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
