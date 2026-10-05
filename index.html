@@ -26,7 +26,11 @@
 
     <section id="setup" class="card hidden">
       <h2>Подключение устройства</h2>
-      <p class="muted">Откройте персональную ссылку на этом iPhone. После первого запуска вход больше не потребуется.</p>
+      <p class="muted">Вставьте персональную ссылку один раз. Ключ сохранится только на этом устройстве, и дальше вход не потребуется.</p>
+      <label for="pairInput">Персональная ссылка</label>
+      <input id="pairInput" class="field" type="text" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://…/#key=…" />
+      <button id="pairBtn" class="btn primary full">Подключить устройство</button>
+      <div id="pairStatus" class="subtle"></div>
     </section>
 
     <section id="dayCard" class="card hidden">

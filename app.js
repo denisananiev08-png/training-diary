@@ -45,16 +45,49 @@ function getToken(){
   if(fromHash){localStorage.setItem(TOKEN_KEY,fromHash);history.replaceState(null,'',location.pathname+location.search)}
   return localStorage.getItem(TOKEN_KEY);
 }
+
+function extractToken(value){
+  const raw=String(value||'').trim();
+  if(!raw)return '';
+  try{
+    const u=new URL(raw);
+    const h=new URLSearchParams(u.hash.replace(/^#/,''));
+    const q=u.searchParams.get('key');
+    return h.get('key')||q||'';
+  }catch{}
+  if(/^[A-Za-z0-9_-]{20,}$/.test(raw))return raw;
+  const m=raw.match(/(?:#|[?&])key=([A-Za-z0-9_-]{20,})/);
+  return m?m[1]:'';
+}
+
+async function pairDevice(){
+  const input=$('#pairInput');
+  const status=$('#pairStatus');
+  const candidate=extractToken(input?.value);
+  if(!candidate){status.textContent='Не вижу ключ в ссылке. Вставьте персональную ссылку целиком.';return}
+  status.textContent='Проверяем подключение…';
+  try{
+    await rpc('diary_get_cycle',{p_token:candidate});
+    localStorage.setItem(TOKEN_KEY,candidate);
+    state.token=candidate;
+    input.value='';
+    status.textContent='Устройство подключено.';
+    $('#setup').classList.add('hidden');
+    await refreshAll(true);
+  }catch(e){
+    status.textContent='Ссылка не подошла. Скопируйте актуальную персональную ссылку и попробуйте ещё раз.';
+  }
+}
 function cacheSave(){if(state.day)localStorage.setItem(CACHE_KEY,JSON.stringify({day:state.day,history:state.history,cycle:state.cycle}))}
 function cacheLoad(){try{return JSON.parse(localStorage.getItem(CACHE_KEY)||'null')}catch{return null}}
 
 async function bootstrap(){
   state.token=getToken();
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
   if(!state.token){$('#setup').classList.remove('hidden'); setSync('Нужна персональная ссылка устройства',true); return}
   $('#setup').classList.add('hidden');
   const cached=cacheLoad(); if(cached){state.cycle=cached.cycle;state.history=cached.history||[]}
   await refreshAll(true);
-  if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
 
 async function refreshAll(jump=false){
@@ -67,7 +100,18 @@ async function refreshAll(jump=false){
     state.day=fromRow(row) || (state.cycle?.planned_date===date?makePlan(date,state.cycle.next_plan):restDay(date,state.cycle?.next_plan||'A'));
     state.history=(hist||[]).map(fromRow);
     state.lastSync=new Date(); cacheSave(); render(); setSync(`Обновлено · ${state.lastSync.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}${state.cycle?` · следующая: ${state.cycle.next_plan}, ${state.cycle.planned_date?.split('-').reverse().join('.')||'—'}`:''}`);
-  }catch(e){const c=cacheLoad();if(c?.day)state.day=c.day;if(c?.history)state.history=c.history;if(c?.cycle)state.cycle=c.cycle;render();setSync(navigator.onLine?`Ошибка синхронизации: ${e.message}`:'Нет связи — показаны данные с телефона',true)}
+  }catch(e){
+    const msg=String(e?.message||e);
+    if(msg.includes('invalid diary token')){
+      localStorage.removeItem(TOKEN_KEY);
+      state.token=null; state.day=null; state.history=[]; state.cycle=null;
+      $('#dayCard').classList.add('hidden'); $('#summaryCard').classList.add('hidden'); $('#exerciseList').innerHTML=''; $('#historyList').innerHTML='';
+      $('#setup').classList.remove('hidden');
+      setSync('Ключ устройства устарел — вставьте актуальную персональную ссылку',true);
+      return;
+    }
+    const c=cacheLoad();if(c?.day)state.day=c.day;if(c?.history)state.history=c.history;if(c?.cycle)state.cycle=c.cycle;render();setSync(navigator.onLine?`Ошибка синхронизации: ${msg}`:'Нет связи — показаны данные с телефона',true)
+  }
   finally{state.loading=false}
 }
 
@@ -112,7 +156,10 @@ async function refreshHistoryOnly(){try{const hist=await rpc('diary_get_history'
 async function finish(){const w=state.day;if(!w||w.status==='rest')return;if(!confirm('Завершить тренировку и перейти к следующему циклу?'))return;w.status='completed';w.hasPlan=true;w.finishedAt=new Date().toISOString();setSync('Сохраняем тренировку…');try{await rpc('diary_save_day',{p_token:state.token,p_payload:payload(w)});state.cycle=await rpc('diary_advance_cycle',{p_token:state.token,p_done_day:w.date,p_done_plan:w.plan});await refreshAll(true)}catch(e){setSync(`Ошибка: ${e.message}`,true)}}
 function summaryText(w){const t=totals(w);const lines=[`${ruDate(w.date)} — ${w.status==='rest'?'восстановление':planTitle(w.plan)}`];if(w.bodyWeight)lines.push(`Утренний вес: ${w.bodyWeight} кг`);if(w.steps)lines.push(`Шаги: ${w.steps}`);lines.push('');w.exercises.forEach(e=>{const sets=e.sets.map(s=>e.kind==='bodyweight'||!s.weight?`${s.reps}`:e.kind==='weighted-bw'?`+${s.weight}кг×${s.reps}`:e.kind==='dumbbell'?`${s.weight}кг(×2)×${s.reps}`:`${s.weight}кг×${s.reps}`).join(', ');lines.push(`${e.name}: ${sets}`)});lines.push('',`ИТОГО: подходов ${t.sets}, повторов ${t.reps}, тоннаж ${Math.round(t.tonnage)} кг`);return lines.join('\n')}
 
-$('#refreshBtn').onclick=()=>refreshAll(true);$('#dateInput').onchange=e=>loadDate(e.target.value);
+$('#refreshBtn').onclick=()=>state.token?refreshAll(true):$('#setup').classList.remove('hidden');
+$('#pairBtn').onclick=pairDevice;
+$('#pairInput').addEventListener('keydown',e=>{if(e.key==='Enter')pairDevice()});
+$('#dateInput').onchange=e=>loadDate(e.target.value);
 $('#weightInput').oninput=e=>{state.day.bodyWeight=e.target.value;scheduleSave()};$('#stepsInput').oninput=e=>{state.day.steps=e.target.value;scheduleSave()};$('#notesInput').oninput=e=>{state.day.notes=e.target.value;scheduleSave()};
 document.querySelectorAll('[data-status]').forEach(b=>b.onclick=()=>{state.day.status=b.dataset.status;if(state.day.status==='rest'){state.day.hasPlan=false;state.day.exercises=[]}else if(!state.day.exercises.length){state.day.hasPlan=true;Object.assign(state.day,makePlan(state.day.date,state.day.plan))}scheduleSave();render()});
 document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{const p=b.dataset.plan;const keep={bodyWeight:state.day.bodyWeight,steps:state.day.steps,notes:state.day.notes,date:state.day.date};state.day={...makePlan(state.day.date,p),...keep};scheduleSave();render()});
