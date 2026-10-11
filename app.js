@@ -1,14 +1,16 @@
+import { nextPlan, cycleFromHistory, isBoxingDate } from './schedule.mjs';
 const SUPABASE_URL = 'https://xmcpqjirltvtbislcbdw.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_oU_xs8mseVtIKVLW-Xe0_Q_p_heECXs';
 const TOKEN_KEY = 'training-diary-device-token-v1';
 const CACHE_KEY = 'training-diary-cache-v1';
 
+// C is retained solely to display old records; it is never offered for new plans.
 const PLANS = {
   A:[
     ['Присед со штангой','barbell',90,3,6],['Жим лёжа','barbell',95,3,8],['Подтягивания + вес','weighted-bw',10,3,6],['Горизонтальная тяга','barbell',55,3,10],['Подъём ног в висе','bodyweight',null,3,10],['Бицепс','dumbbell',15,2,8]
   ],
   B:[
-    ['Присед со штангой','barbell',85,3,8],['Жим гантелей под наклоном','dumbbell',32,3,8],['Подтягивания без веса','bodyweight',null,3,8],['Горизонтальная тяга','barbell',55,3,10],['Жим гантелей над головой','dumbbell',null,2,8],['Пресс на наклонной скамье','bodyweight',null,3,12]
+    ['Присед со штангой','barbell',70,2,6],['Жим гантелей под наклоном','dumbbell',24,2,8],['Подтягивания без веса','bodyweight',null,2,6],['Горизонтальная тяга','barbell',45,2,10],['Пресс на наклонной скамье','bodyweight',null,2,10]
   ],
   C:[
     ['Присед со штангой','barbell',87.5,3,6],['Жим лёжа','barbell',90,3,8],['Подтягивания без веса','bodyweight',null,3,8],['Горизонтальная тяга','barbell',55,3,10],['Брусья','bodyweight',null,2,10],['Подъём ног в висе','bodyweight',null,3,10]
@@ -22,16 +24,17 @@ const state = { token:null, cycle:null, day:null, history:[], syncTimer:null, la
 function uid(){return Math.random().toString(36).slice(2,10)}
 function localDate(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function ruDate(s){if(!s)return '';const [y,m,d]=s.split('-').map(Number);const dt=new Date(y,m-1,d);return dt.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',weekday:'long'})}
-function planTitle(p){return p==='A'?'Full Body A — тяжёлая':p==='B'?'Full Body B — объёмная':'Full Body C — средняя'}
-function nextPlan(p){return p==='A'?'B':p==='B'?'C':'A'}
+function planTitle(p){return p==='A'?'Full Body A — основная':p==='B'?'Full Body B — облегчённая':'Full Body C — архивная'}
 function makePlan(date, plan){return {date,plan,hasPlan:true,status:'planned',notes:'',bodyWeight:'',steps:'',finishedAt:null,exercises:PLANS[plan].map(([name,kind,w,sets,reps])=>({id:uid(),name,kind,sets:Array.from({length:sets},()=>({id:uid(),weight:w==null?'':String(w),reps:String(reps),done:false}))}))}}
 function restDay(date, plan='A'){return {date,plan,hasPlan:false,status:'rest',notes:'',bodyWeight:'',steps:'',finishedAt:null,exercises:[]}}
+function boxingDay(date){return {...restDay(date),activity:'boxing',status:'planned'}}
+function defaultDay(date){return state.cycle?.planned_date===date?makePlan(date,state.cycle.next_plan):isBoxingDate(date)?boxingDay(date):restDay(date,state.cycle?.next_plan||'A')}
 function fromRow(row){
   if(!row)return null; const plan=row.plan||state.cycle?.next_plan||'A'; let ex=(row.workout?.exercises||[]).map(e=>({id:uid(),name:e.name||'Упражнение',kind:e.kind||'barbell',sets:(e.sets||[]).map(s=>({id:uid(),weight:s.weight===0||s.weight==null?'':String(s.weight),reps:s.reps==null?'':String(s.reps),done:!!s.done}))}));
   if(row.status==='planned'&&row.plan&&ex.length===0) ex=makePlan(row.day,plan).exercises;
-  return {date:row.day,plan,hasPlan:!!row.plan,status:row.status||'planned',notes:row.notes||'',bodyWeight:row.morning_weight==null?'':String(row.morning_weight),steps:row.steps==null?'':String(row.steps),finishedAt:row.completed_at||null,exercises:ex};
+  return {date:row.day,plan,activity:row.workout?.activity||null,hasPlan:!!row.plan,status:row.status||'planned',notes:row.notes||'',bodyWeight:row.morning_weight==null?'':String(row.morning_weight),steps:row.steps==null?'':String(row.steps),finishedAt:row.completed_at||null,exercises:ex};
 }
-function payload(w){return {day:w.date,plan:w.hasPlan?w.plan:'',status:w.status,notes:w.notes||'',morning_weight:w.bodyWeight||'',steps:w.steps||'',completed_at:w.finishedAt||'',workout:w.exercises.length?{title:planTitle(w.plan),exercises:w.exercises.map(e=>({name:e.name,kind:e.kind,sets:e.sets.map(s=>({done:s.done,reps:s.reps===''?null:Number(s.reps),weight:s.weight===''?0:Number(String(s.weight).replace(',','.'))}))}))}:null}}
+function payload(w){return {day:w.date,plan:w.hasPlan?w.plan:'',status:w.status,notes:w.notes||'',morning_weight:w.bodyWeight||'',steps:w.steps||'',completed_at:w.finishedAt||'',workout:w.activity==='boxing'?{activity:'boxing',title:'Индивидуальный бокс',duration_minutes:90,start_time:'09:00',end_time:'10:30',exercises:[]}:w.exercises.length?{program_version:'ab-boxing-v1',title:planTitle(w.plan),exercises:w.exercises.map(e=>({name:e.name,kind:e.kind,sets:e.sets.map(s=>({done:s.done,reps:s.reps===''?null:Number(s.reps),weight:s.weight===''?0:Number(String(s.weight).replace(',','.'))}))}))}:null}}
 
 async function rpc(name, body){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -93,12 +96,13 @@ async function bootstrap(){
 async function refreshAll(jump=false){
   if(state.loading)return; state.loading=true; setSync('Синхронизация…');
   try{
-    state.cycle=await rpc('diary_get_cycle',{p_token:state.token});
-    let date=$('#dateInput').value||localDate();
-    if(jump&&state.cycle?.planned_date&&state.cycle.planned_date>=localDate()) date=state.cycle.planned_date;
-    const [row,hist]=await Promise.all([rpc('diary_get_day',{p_token:state.token,p_day:date}),rpc('diary_get_history',{p_token:state.token})]);
-    state.day=fromRow(row) || (state.cycle?.planned_date===date?makePlan(date,state.cycle.next_plan):restDay(date,state.cycle?.next_plan||'A'));
+    const hist=await rpc('diary_get_history',{p_token:state.token});
     state.history=(hist||[]).map(fromRow);
+    state.cycle=cycleFromHistory(state.history,localDate());
+    let date=$('#dateInput').value||localDate();
+    if(jump&&state.cycle?.planned_date) date=state.cycle.planned_date;
+    const row=await rpc('diary_get_day',{p_token:state.token,p_day:date});
+    state.day=scheduledDay(row,date);
     state.lastSync=new Date(); cacheSave(); render(); setSync(`Обновлено · ${state.lastSync.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}${state.cycle?` · следующая: ${state.cycle.next_plan}, ${state.cycle.planned_date?.split('-').reverse().join('.')||'—'}`:''}`);
   }catch(e){
     const msg=String(e?.message||e);
@@ -110,11 +114,24 @@ async function refreshAll(jump=false){
       setSync('Ключ устройства устарел — вставьте актуальную персональную ссылку',true);
       return;
     }
-    const c=cacheLoad();if(c?.day)state.day=c.day;if(c?.history)state.history=c.history;if(c?.cycle)state.cycle=c.cycle;render();setSync(navigator.onLine?`Ошибка синхронизации: ${msg}`:'Нет связи — показаны данные с телефона',true)
+    const c=cacheLoad();if(c?.day)state.day=c.day;if(c?.history)state.history=c.history;state.cycle=cycleFromHistory(state.history,localDate());if(state.day?.status==='planned'&&state.day.plan==='C')state.day=defaultDay(state.day.date);render();setSync(navigator.onLine?`Ошибка синхронизации: ${msg}`:'Нет связи — показаны данные с телефона',true)
   }
   finally{state.loading=false}
 }
 
+// Only pending legacy plans are replaced in memory; completed records are never migrated.
+function scheduledDay(row,date){
+  const day=fromRow(row);
+  if(day?.status==='completed'||day?.activity==='boxing')return day;
+  if(state.cycle?.planned_date===date&&(!day||!day.hasPlan||day.plan!==state.cycle.next_plan)){
+    return {...makePlan(date,state.cycle.next_plan),bodyWeight:day?.bodyWeight||'',steps:day?.steps||'',notes:day?.notes||''};
+  }
+  if(day?.status==='planned'&&day.plan==='C'){return {...defaultDay(date),bodyWeight:day.bodyWeight,steps:day.steps,notes:day.notes}}
+  if(day?.status==='planned'&&day.hasPlan&&['A','B'].includes(day.plan)&&row.workout?.program_version!=='ab-boxing-v1'&&!day.exercises.some(e=>e.sets.some(s=>s.done))){
+    return {...makePlan(date,day.plan),bodyWeight:day.bodyWeight,steps:day.steps,notes:day.notes};
+  }
+  return day||defaultDay(date);
+}
 function setSync(text,error=false){const el=$('#syncLine');el.textContent=text;el.classList.toggle('error',error)}
 function parseNum(v){const n=Number(String(v).replace(',','.'));return Number.isFinite(n)?n:0}
 function setTonnage(kind,w,reps){if(kind==='bodyweight')return 0;if(kind==='dumbbell')return w*2*reps;return w*reps}
@@ -124,10 +141,15 @@ function exerciseTotals(e){let sets=0,reps=0,tonnage=0;e.sets.forEach(s=>{const 
 function render(){
   const w=state.day;if(!w)return;
   $('#dayCard').classList.remove('hidden');$('#summaryCard').classList.toggle('hidden',w.status==='rest');
-  $('#title').textContent=w.status==='rest'?'Восстановление':planTitle(w.plan);
+  $('#title').textContent=w.activity==='boxing'?'Индивидуальный бокс':w.status==='rest'?'Восстановление':planTitle(w.plan);
+  $('#boxingDetails').classList.toggle('hidden',w.activity!=='boxing');
+  $('#summaryCard .stats').classList.toggle('hidden',w.activity==='boxing');
+  $('#finishBtn').disabled=w.status==='completed'||state.finishing;
+  $('#finishBtn').textContent=w.status==='completed'?'Тренировка завершена':'Завершить тренировку';
   $('#dateInput').value=w.date;$('#dateLabel').textContent=ruDate(w.date);$('#weightInput').value=w.bodyWeight;$('#stepsInput').value=w.steps;$('#notesInput').value=w.notes;
   document.querySelectorAll('[data-status]').forEach(b=>b.classList.toggle('active',b.dataset.status===w.status));
-  document.querySelectorAll('[data-plan]').forEach(b=>b.classList.toggle('active',w.status!=='rest'&&b.dataset.plan===w.plan));
+  document.querySelectorAll('[data-plan]').forEach(b=>b.classList.toggle('active',w.status!=='rest'&&w.activity!=='boxing'&&b.dataset.plan===w.plan));
+  $('#boxingBtn').classList.toggle('active',w.status!=='rest'&&w.activity==='boxing');
   renderExercises(); renderTotals(); renderHistory();
 }
 
@@ -145,24 +167,61 @@ function renderExercises(){
   });
 }
 function renderTotals(){if(!state.day)return;const t=totals(state.day);$('#setsTotal').textContent=t.sets;$('#repsTotal').textContent=t.reps;$('#tonnageTotal').textContent=Math.round(t.tonnage)}
-function renderHistory(){const root=$('#historyList');root.innerHTML='';state.history.forEach(h=>{const b=document.createElement('button');b.className='history-item';const t=totals(h);b.innerHTML=`<strong>${ruDate(h.date)}</strong><span>${h.status==='rest'?'Отдых':`${h.plan} · ${h.status==='completed'?'Завершена':'План'}`}${h.status==='completed'?` · ${Math.round(t.tonnage)} кг`:''}${h.bodyWeight?` · ${h.bodyWeight} кг утром`:''}</span>`;b.onclick=async()=>{$('#dateInput').value=h.date;await loadDate(h.date)};root.appendChild(b)})}
+function renderHistory(){const root=$('#historyList');root.innerHTML='';state.history.forEach(h=>{const b=document.createElement('button');b.className='history-item';const t=totals(h);b.innerHTML=`<strong>${ruDate(h.date)}</strong><span>${h.activity==='boxing'?`Бокс · 09:00–10:30 · ${h.status==='completed'?'Завершена':'План'}`:h.status==='rest'?'Отдых':`${h.plan} · ${h.status==='completed'?'Завершена':'План'}`}${h.status==='completed'?` · ${Math.round(t.tonnage)} кг`:''}${h.bodyWeight?` · ${h.bodyWeight} кг утром`:''}</span>`;b.onclick=async()=>{$('#dateInput').value=h.date;await loadDate(h.date)};root.appendChild(b)})}
 
-async function loadDate(date){setSync('Загрузка…');try{const row=await rpc('diary_get_day',{p_token:state.token,p_day:date});state.day=fromRow(row)||(state.cycle?.planned_date===date?makePlan(date,state.cycle.next_plan):restDay(date,state.cycle?.next_plan||'A'));cacheSave();render();setSync('Обновлено')}catch(e){setSync(`Ошибка: ${e.message}`,true)}}
+async function loadDate(date){setSync('Загрузка…');try{const row=await rpc('diary_get_day',{p_token:state.token,p_day:date});state.day=scheduledDay(row,date);cacheSave();render();setSync('Обновлено')}catch(e){setSync(`Ошибка: ${e.message}`,true)}}
 
 function scheduleSave(){cacheSave();clearTimeout(state.syncTimer);setSync('Сохраняем…');state.syncTimer=setTimeout(saveDay,700)}
 async function saveDay(){if(!state.day)return;try{await rpc('diary_save_day',{p_token:state.token,p_payload:payload(state.day)});state.lastSync=new Date();await refreshHistoryOnly();setSync(`Обновлено · ${state.lastSync.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`)}catch(e){setSync(navigator.onLine?`Ошибка синхронизации: ${e.message}`:'Нет связи — сохранено на телефоне',true)}}
 async function refreshHistoryOnly(){try{const hist=await rpc('diary_get_history',{p_token:state.token});state.history=(hist||[]).map(fromRow);cacheSave();renderHistory()}catch{}}
 
-async function finish(){const w=state.day;if(!w||w.status==='rest')return;if(!confirm('Завершить тренировку и перейти к следующему циклу?'))return;w.status='completed';w.hasPlan=true;w.finishedAt=new Date().toISOString();setSync('Сохраняем тренировку…');try{await rpc('diary_save_day',{p_token:state.token,p_payload:payload(w)});state.cycle=await rpc('diary_advance_cycle',{p_token:state.token,p_done_day:w.date,p_done_plan:w.plan});await refreshAll(true)}catch(e){setSync(`Ошибка: ${e.message}`,true)}}
-function summaryText(w){const t=totals(w);const lines=[`${ruDate(w.date)} — ${w.status==='rest'?'восстановление':planTitle(w.plan)}`];if(w.bodyWeight)lines.push(`Утренний вес: ${w.bodyWeight} кг`);if(w.steps)lines.push(`Шаги: ${w.steps}`);lines.push('');w.exercises.forEach(e=>{const sets=e.sets.map(s=>e.kind==='bodyweight'||!s.weight?`${s.reps}`:e.kind==='weighted-bw'?`+${s.weight}кг×${s.reps}`:e.kind==='dumbbell'?`${s.weight}кг(×2)×${s.reps}`:`${s.weight}кг×${s.reps}`).join(', ');lines.push(`${e.name}: ${sets}`)});lines.push('',`ИТОГО: подходов ${t.sets}, повторов ${t.reps}, тоннаж ${Math.round(t.tonnage)} кг`);return lines.join('\n')}
+async function finish(){
+  const w=state.day;
+  if(!w||w.status==='rest'||w.status==='completed'||state.finishing)return;
+  if(!confirm('Завершить тренировку?'))return;
+  clearTimeout(state.syncTimer);
+  state.finishing=true;
+  const previous={status:w.status,hasPlan:w.hasPlan,finishedAt:w.finishedAt};
+  w.status='completed';w.hasPlan=w.activity!=='boxing';w.finishedAt=new Date().toISOString();
+  setSync('Сохраняем тренировку…');render();
+  let saved=false;
+  try{
+    await rpc('diary_save_day',{p_token:state.token,p_payload:payload(w)});saved=true;
+    if(w.activity!=='boxing'){
+      const hist=await rpc('diary_get_history',{p_token:state.token});
+      state.history=(hist||[]).map(fromRow);
+      state.cycle=cycleFromHistory(state.history,localDate());
+      const date=state.cycle.planned_date;
+      const row=await rpc('diary_get_day',{p_token:state.token,p_day:date});
+      const upcoming=scheduledDay(row,date);
+      // Persist the A/B plan with the existing protected RPC, without calling the legacy A/B/C advance function.
+      if(upcoming.status!=='completed')await rpc('diary_save_day',{p_token:state.token,p_payload:payload(upcoming)});
+    }
+    await refreshAll(w.activity!=='boxing');
+  }catch(e){
+    if(!saved)Object.assign(w,previous);
+    setSync(saved?`Тренировка сохранена. Не удалось сохранить следующий план: ${e.message}. Нажмите «Обновить».`:`Ошибка: ${e.message}`,true);
+  }finally{state.finishing=false;cacheSave();render()}
+}
+function summaryText(w){const t=totals(w);const lines=[`${ruDate(w.date)} — ${w.activity==='boxing'?'Индивидуальный бокс · 90 минут · 09:00–10:30':w.status==='rest'?'восстановление':planTitle(w.plan)}`];if(w.bodyWeight)lines.push(`Утренний вес: ${w.bodyWeight} кг`);if(w.steps)lines.push(`Шаги: ${w.steps}`);lines.push('');w.exercises.forEach(e=>{const sets=e.sets.map(s=>e.kind==='bodyweight'||!s.weight?`${s.reps}`:e.kind==='weighted-bw'?`+${s.weight}кг×${s.reps}`:e.kind==='dumbbell'?`${s.weight}кг(×2)×${s.reps}`:`${s.weight}кг×${s.reps}`).join(', ');lines.push(`${e.name}: ${sets}`)});lines.push('',`ИТОГО: подходов ${t.sets}, повторов ${t.reps}, тоннаж ${Math.round(t.tonnage)} кг`);return lines.join('\n')}
 
 $('#refreshBtn').onclick=()=>state.token?refreshAll(true):$('#setup').classList.remove('hidden');
 $('#pairBtn').onclick=pairDevice;
 $('#pairInput').addEventListener('keydown',e=>{if(e.key==='Enter')pairDevice()});
 $('#dateInput').onchange=e=>loadDate(e.target.value);
 $('#weightInput').oninput=e=>{state.day.bodyWeight=e.target.value;scheduleSave()};$('#stepsInput').oninput=e=>{state.day.steps=e.target.value;scheduleSave()};$('#notesInput').oninput=e=>{state.day.notes=e.target.value;scheduleSave()};
-document.querySelectorAll('[data-status]').forEach(b=>b.onclick=()=>{state.day.status=b.dataset.status;if(state.day.status==='rest'){state.day.hasPlan=false;state.day.exercises=[]}else if(!state.day.exercises.length){state.day.hasPlan=true;Object.assign(state.day,makePlan(state.day.date,state.day.plan))}scheduleSave();render()});
-document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{const p=b.dataset.plan;const keep={bodyWeight:state.day.bodyWeight,steps:state.day.steps,notes:state.day.notes,date:state.day.date};state.day={...makePlan(state.day.date,p),...keep};scheduleSave();render()});
+document.querySelectorAll('[data-status]').forEach(b=>b.onclick=()=>{state.day.status=b.dataset.status;if(state.day.status==='rest'){state.day.hasPlan=false;state.day.exercises=[]}else if(state.day.activity==='boxing'){state.day.hasPlan=false}else if(!state.day.exercises.length){state.day.hasPlan=true;Object.assign(state.day,makePlan(state.day.date,state.day.plan))}scheduleSave();render()});
+function chooseTraining(type){
+  const w=state.day;if(!w||state.finishing)return;
+  if(w.status==='completed'||w.exercises.some(e=>e.sets.some(s=>s.done))){
+    if(!confirm('На этой дате уже записана тренировка. Заменить её тип и подходы?'))return;
+  }
+  const keep={bodyWeight:w.bodyWeight,steps:w.steps,notes:w.notes,date:w.date};
+  state.day={...(type==='boxing'?boxingDay(w.date):makePlan(w.date,type)),...keep};
+  scheduleSave();render();
+}
+document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>chooseTraining(b.dataset.plan));
+$('#boxingBtn').onclick=()=>chooseTraining('boxing');
 $('#finishBtn').onclick=finish;$('#copyBtn').onclick=async()=>{await navigator.clipboard.writeText(summaryText(state.day));$('#copyBtn').textContent='Скопировано';setTimeout(()=>$('#copyBtn').textContent='Скопировать итог',1200)};
 window.addEventListener('online',()=>refreshAll(false));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshAll(false)});
 bootstrap();

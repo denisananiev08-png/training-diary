@@ -45,13 +45,20 @@
         <button data-status="completed">Завершена</button>
       </div>
 
-      <div class="section-label">План</div>
-      <div class="segmented" id="planButtons">
-        <button data-plan="A">A</button>
-        <button data-plan="B">B</button>
-        <button data-plan="C">C</button>
+      <div id="planSection">
+        <div class="section-label">Выбрать тренировку</div>
+        <div class="segmented" id="planButtons">
+          <button data-plan="A">A — основная</button>
+          <button data-plan="B">B — облегчённая</button>
+          <button id="boxingBtn">Бокс</button>
+        </div>
+        <p class="subtle">Вторник — A: 2–3 рабочих подхода без отказа. Четверг — B: 2 подхода, сниженная нагрузка.</p>
+        <p class="subtle">Бокс можно выбрать на любую дату, в том числе добавить третье занятие в неделю. Силовой цикл A → B от этого не меняется.</p>
       </div>
-      <p class="subtle">Цикл A → B → C. Перенос даты не меняет тип тренировки.</p>
+      <div id="boxingDetails" class="hidden">
+        <h2>Индивидуальный бокс</h2>
+        <p class="subtle">90 минут · 09:00–10:30</p>
+      </div>
 
       <div class="two-col">
         <div>
@@ -79,6 +86,13 @@
       </div>
       <button id="finishBtn" class="btn primary full">Завершить тренировку</button>
       <button id="copyBtn" class="btn ghost full">Скопировать итог</button>
+    </section>
+
+    <section class="card">
+      <h2>Недельный цикл</h2>
+      <p class="subtle">Пн — восстановление · Вт — Full Body A · Ср — отдых · Чт — облегчённая Full Body B · Пт — отдых.</p>
+      <p>Сб и Вс — индивидуальный бокс<br>09:00–10:30 · по 90 минут</p>
+      <p class="subtle">Дополнительный бокс — выберите дату и нажмите «Бокс».</p>
     </section>
 
     <section class="history-section">
